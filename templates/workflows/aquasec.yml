@@ -1,0 +1,282 @@
+name: Aqua Security Scan
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+  schedule:
+    - cron: '0 5 * * 1'  # Weekly on Monday at 5 AM
+
+# Trivy uses GitHub token for private repo scanning and can use Trivy server token if configured
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  # Optional: TRIVY_TOKEN if using Trivy server mode
+  # TRIVY_TOKEN: ${{ secrets.TRIVY_TOKEN }}
+
+jobs:
+  aquasec-container-scan:
+    name: Aqua Container Security Scan
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read
+      security-events: write
+      pull-requests: write
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Detect containerization
+        id: detect
+        run: |
+          if [ -f "Dockerfile" ] || [ -f "docker-compose.yml" ] || [ -f "Containerfile" ]; then
+            echo "has_container=true" >> $GITHUB_OUTPUT
+            if [ -f "Dockerfile" ]; then
+              echo "dockerfile=Dockerfile" >> $GITHUB_OUTPUT
+            elif [ -f "Containerfile" ]; then
+              echo "dockerfile=Containerfile" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "has_container=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Build Docker image (if Dockerfile exists)
+        if: steps.detect.outputs.has_container == 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ${{ steps.detect.outputs.dockerfile }}
+          push: false
+          tags: ${{ github.repository }}:${{ github.sha }}
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      
+      - name: Run Trivy vulnerability scanner
+        if: steps.detect.outputs.has_container == 'true'
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '${{ github.repository }}:${{ github.sha }}'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          exit-code: '1'
+          ignore-unfixed: false
+          vuln-type: 'os,library'
+          scanners: 'vuln,secret,config'
+      
+      - name: Upload Trivy results to GitHub Security tab
+        if: steps.detect.outputs.has_container == 'true' && always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
+          category: 'trivy-container'
+      
+      - name: Run Trivy for PR comment
+        if: steps.detect.outputs.has_container == 'true' && github.event_name == 'pull_request'
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '${{ github.repository }}:${{ github.sha }}'
+          format: 'json'
+          output: 'trivy-pr.json'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          vuln-type: 'os,library'
+      
+      - name: Comment PR with Trivy results
+        if: steps.detect.outputs.has_container == 'true' && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            
+            try {
+              const trivyResults = JSON.parse(fs.readFileSync('trivy-pr.json', 'utf8'));
+              
+              let comment = '## 🔍 Aqua Security (Trivy) Container Scan Results\n\n';
+              
+              if (trivyResults.Results && trivyResults.Results.length > 0) {
+                let totalVulnerabilities = 0;
+                let criticalCount = 0;
+                let highCount = 0;
+                let mediumCount = 0;
+                
+                trivyResults.Results.forEach(result => {
+                  if (result.Vulnerabilities) {
+                    result.Vulnerabilities.forEach(vuln => {
+                      totalVulnerabilities++;
+                      if (vuln.Severity === 'CRITICAL') criticalCount++;
+                      else if (vuln.Severity === 'HIGH') highCount++;
+                      else if (vuln.Severity === 'MEDIUM') mediumCount++;
+                    });
+                  }
+                });
+                
+                comment += `📊 **Scan Summary**:\n`;
+                comment += `- 🔴 **Critical**: ${criticalCount}\n`;
+                comment += `- 🟠 **High**: ${highCount}\n`;
+                comment += `- 🟡 **Medium**: ${mediumCount}\n`;
+                comment += `- 📋 **Total**: ${totalVulnerabilities} vulnerabilities found\n\n`;
+                
+                if (totalVulnerabilities > 0) {
+                  comment += '⚠️ **Top Vulnerabilities**:\n';
+                  comment += '| CVE | Severity | Package | Current Version | Fixed Version |\n';
+                  comment += '|-----|----------|---------|----------------|---------------|\n';
+                  
+                  // Show top 5 vulnerabilities
+                  const topVulns = trivyResults.Results.flatMap(r => r.Vulnerabilities || [])
+                    .sort((a, b) => {
+                      const severityOrder = { 'CRITICAL': 3, 'HIGH': 2, 'MEDIUM': 1 };
+                      return (severityOrder[b.Severity] || 0) - (severityOrder[a.Severity] || 0);
+                    })
+                    .slice(0, 5);
+                  
+                  topVulns.forEach(vuln => {
+                    comment += `| ${vuln.VulnerabilityID || 'N/A'} | ${vuln.Severity} | ${vuln.PkgName} | ${vuln.InstalledVersion} | ${vuln.FixedVersion || 'N/A'} |\n`;
+                  });
+                } else {
+                  comment += '✅ **No vulnerabilities found!** Container image is secure.\n';
+                }
+              } else {
+                comment += '✅ **No vulnerabilities found!** Container image is secure.\n';
+              }
+              
+              comment += '\n---\n';
+              comment += '💡 **Tip**: Address critical and high severity vulnerabilities first. ';
+              comment += 'Medium severity issues should be reviewed and remediated when possible.';
+              
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: comment
+              });
+            } catch (error) {
+              console.log('Error parsing Trivy results:', error);
+              
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: '## 🔍 Aqua Security (Trivy) Container Scan Results\n\n⚠️ **Unable to parse scan results** - check the workflow logs for details.'
+              });
+            }
+
+      - name: Upload Trivy reports
+        if: steps.detect.outputs.has_container == 'true' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-reports
+          path: |
+            trivy-results.sarif
+            trivy-pr.json
+          retention-days: 30
+
+  aquasec-filesystem-scan:
+    name: Aqua Filesystem Security Scan
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read
+      security-events: write
+      pull-requests: write
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-fs-results.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          exit-code: '0'  # Don't fail the build, just report
+          ignore-unfixed: false
+          vuln-type: 'os,library'
+          scanners: 'vuln,secret,config'
+      
+      - name: Upload filesystem scan results
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-fs-results.sarif'
+          category: 'trivy-filesystem'
+      
+      - name: Run Trivy config scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'config'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-config-results.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          exit-code: '0'
+      
+      - name: Upload config scan results
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-config-results.sarif'
+          category: 'trivy-config'
+
+  aquasec-server-integration:
+    name: Trivy Server Integration (Optional)
+    runs-on: ubuntu-latest
+    # Only run if Trivy server is configured
+    if: ${{ secrets.TRIVY_SERVER_URL != '' }}
+    
+    permissions:
+      contents: read
+      security-events: write
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Configure Trivy Server Authentication
+        run: |
+          echo "TRIVY_SERVER_URL=${{ secrets.TRIVY_SERVER_URL }}" >> $GITHUB_ENV
+          echo "TRIVY_TOKEN=${{ secrets.TRIVY_TOKEN }}" >> $GITHUB_ENV
+      
+      - name: Run Trivy with Server Mode
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-server-results.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          exit-code: '0'
+        env:
+          TRIVY_SERVER_URL: ${{ secrets.TRIVY_SERVER_URL }}
+          TRIVY_TOKEN: ${{ secrets.TRIVY_TOKEN }}
+      
+      - name: Upload server scan results
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-server-results.sarif'
+          category: 'trivy-server'
+
+  aquasec-summary:
+    name: Aqua Security Summary
+    runs-on: ubuntu-latest
+    needs: [aquasec-container-scan, aquasec-filesystem-scan]
+    if: always()
+    
+    steps:
+      - name: Security Summary
+        uses: actions/github-script@v7
+        with:
+          script: |
+            console.log('Aqua Security scans completed');
+            console.log('Container and filesystem scans have been executed');
+            console.log('Results are available in GitHub Security tab');
+            console.log('Review findings and remediate critical/high severity issues');

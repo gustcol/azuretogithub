@@ -1,0 +1,230 @@
+{
+  "jira": {
+    "connection": {
+      "url": "https://yourcompany.atlassian.net",
+      "email": "",
+      "apiToken": "",
+      "cloudOrServer": "cloud"
+    },
+    "defaultProject": "PROJ",
+    "importOptions": {
+      "batchSize": 50,
+      "rateLimit": {
+        "requestsPerSecond": 10,
+        "delayBetweenBatchesMs": 2000
+      },
+      "migrateAttachments": true,
+      "migrateComments": true,
+      "migrateLinks": true,
+      "preserveOriginalIds": true,
+      "createMissingUsers": false
+    }
+  },
+  "azureDevOps": {
+    "organization": "",
+    "project": "",
+    "pat": "",
+    "areaPath": "",
+    "iterationPath": "",
+    "workItemTypes": ["Bug", "Task", "User Story", "Feature", "Epic"]
+  },
+  "fieldMappings": {
+    "workItemTypes": {
+      "Bug": "Bug",
+      "Task": "Task",
+      "User Story": "Story",
+      "Feature": "Epic",
+      "Epic": "Epic",
+      "Issue": "Task",
+      "Impediment": "Bug",
+      "Test Case": "Task",
+      "Product Backlog Item": "Story"
+    },
+    "states": {
+      "New": "To Do",
+      "Active": "In Progress",
+      "In Progress": "In Progress",
+      "Resolved": "Done",
+      "Closed": "Done",
+      "Done": "Done",
+      "Removed": "Done",
+      "Approved": "To Do",
+      "Committed": "In Progress",
+      "Ready": "To Do"
+    },
+    "priorities": {
+      "1": "Highest",
+      "2": "High",
+      "3": "Medium",
+      "4": "Low",
+      "5": "Lowest"
+    },
+    "fields": {
+      "System.Title": "summary",
+      "System.Description": "description",
+      "System.AssignedTo": "assignee",
+      "System.State": "status",
+      "System.Reason": "customfield_reason",
+      "System.AreaPath": "components",
+      "System.IterationPath": "fixVersions",
+      "System.Tags": "labels",
+      "System.CreatedBy": "reporter",
+      "System.CreatedDate": "created",
+      "System.ChangedDate": "updated",
+      "Microsoft.VSTS.Common.Priority": "priority",
+      "Microsoft.VSTS.Common.Severity": "customfield_severity",
+      "Microsoft.VSTS.Scheduling.StoryPoints": "customfield_storypoints",
+      "Microsoft.VSTS.Scheduling.Effort": "customfield_effort",
+      "Microsoft.VSTS.Scheduling.RemainingWork": "timetracking.remainingEstimateSeconds",
+      "Microsoft.VSTS.Scheduling.CompletedWork": "timetracking.timeSpentSeconds",
+      "Microsoft.VSTS.Scheduling.OriginalEstimate": "timetracking.originalEstimateSeconds",
+      "Microsoft.VSTS.Common.AcceptanceCriteria": "customfield_acceptancecriteria",
+      "Microsoft.VSTS.TCM.ReproSteps": "customfield_reprosteps",
+      "Microsoft.VSTS.Build.FoundIn": "customfield_foundin",
+      "Microsoft.VSTS.Build.IntegrationBuild": "customfield_integrationbuild"
+    },
+    "customFields": {
+      "customfield_storypoints": {
+        "name": "Story Points",
+        "type": "number",
+        "jiraFieldId": ""
+      },
+      "customfield_severity": {
+        "name": "Severity",
+        "type": "select",
+        "jiraFieldId": "",
+        "valueMapping": {
+          "1 - Critical": "Critical",
+          "2 - High": "Major",
+          "3 - Medium": "Normal",
+          "4 - Low": "Minor"
+        }
+      },
+      "customfield_effort": {
+        "name": "Effort",
+        "type": "number",
+        "jiraFieldId": ""
+      },
+      "customfield_acceptancecriteria": {
+        "name": "Acceptance Criteria",
+        "type": "text",
+        "jiraFieldId": ""
+      },
+      "customfield_reprosteps": {
+        "name": "Steps to Reproduce",
+        "type": "text",
+        "jiraFieldId": ""
+      }
+    }
+  },
+  "linkMappings": {
+    "System.LinkTypes.Hierarchy-Forward": "is parent of",
+    "System.LinkTypes.Hierarchy-Reverse": "is child of",
+    "System.LinkTypes.Related": "relates to",
+    "System.LinkTypes.Dependency-Forward": "blocks",
+    "System.LinkTypes.Dependency-Reverse": "is blocked by",
+    "Microsoft.VSTS.Common.Affects-Forward": "causes",
+    "Microsoft.VSTS.Common.Affects-Reverse": "is caused by",
+    "System.LinkTypes.Duplicate-Forward": "duplicates",
+    "System.LinkTypes.Duplicate-Reverse": "is duplicated by"
+  },
+  "userMappings": {
+    "enabled": true,
+    "mappingFile": "./mappings/user-mappings.csv",
+    "defaultAssignee": "",
+    "unassignedBehavior": "leaveEmpty",
+    "emailDomainMapping": {
+      "oldcompany.com": "newcompany.com"
+    }
+  },
+  "filters": {
+    "workItemQuery": "",
+    "excludeStates": ["Removed"],
+    "excludeTypes": [],
+    "dateRange": {
+      "enabled": false,
+      "startDate": "",
+      "endDate": ""
+    },
+    "areaPathFilter": [],
+    "iterationPathFilter": [],
+    "tagFilter": []
+  },
+  "gitHubIntegration": {
+    "enabled": true,
+    "organization": "",
+    "pat": "",
+    "webhooks": {
+      "enabled": false,
+      "secret": ""
+    },
+    "workflows": {
+      "deployIssueTransition": true,
+      "deployCreateIssue": true,
+      "deploySyncStatus": true,
+      "deployReleaseNotes": true
+    },
+    "branchNamingConvention": "feature/{issueKey}-{summary}",
+    "commitMessagePattern": "{issueKey}: {message}",
+    "transitionMappings": {
+      "pull_request.opened": {
+        "transition": "In Progress",
+        "addComment": true
+      },
+      "pull_request.merged": {
+        "transition": "Done",
+        "addComment": true,
+        "resolution": "Done"
+      },
+      "pull_request.closed": {
+        "transition": null,
+        "addComment": true
+      },
+      "push": {
+        "transition": null,
+        "addComment": true
+      }
+    },
+    "labels": {
+      "syncJiraStatus": true,
+      "labelPrefix": "jira:"
+    }
+  },
+  "reporting": {
+    "outputPath": "./reports/jira-migration",
+    "generateCsvReport": true,
+    "generateJsonReport": true,
+    "generateHtmlReport": true,
+    "includeFailedItems": true,
+    "includeMappingReport": true
+  },
+  "errorHandling": {
+    "stopOnError": false,
+    "maxRetries": 3,
+    "retryDelayMs": 5000,
+    "logFailedItems": true,
+    "createErrorReport": true
+  },
+  "validation": {
+    "validateBeforeMigration": true,
+    "checkRequiredFields": true,
+    "checkUserMappings": true,
+    "checkCustomFields": true,
+    "dryRunFirst": true
+  },
+  "notifications": {
+    "enabled": false,
+    "slack": {
+      "enabled": false,
+      "webhookUrl": "",
+      "channel": "#jira-migration"
+    },
+    "email": {
+      "enabled": false,
+      "recipients": [],
+      "smtpServer": "",
+      "smtpPort": 587
+    },
+    "notifyOn": ["start", "complete", "error", "milestone"]
+  }
+}

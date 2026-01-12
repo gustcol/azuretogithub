@@ -1,0 +1,116 @@
+name: Checkov Security Scan
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+  schedule:
+    - cron: '0 2 * * 1'  # Weekly on Monday at 2 AM
+
+env:
+  CHECKOV_VERSION: 2.4.9
+
+jobs:
+  checkov-scan:
+    name: Checkov Infrastructure Scan
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Run Checkov scan
+        id: checkov
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: .
+          check: CKV_*  # All Checkov checks
+          skip_check: CKV_GHA_*,CKV_OPENAPI_*
+          framework: all
+          output_format: cli,sarif
+          output_file_path: reports/checkov-results.sarif
+          download_external_modules: true
+          soft_fail: false
+          compact: true
+          
+      - name: Upload Checkov results to GitHub Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: reports/checkov-results.sarif
+          category: checkov
+          
+      - name: Comment PR with Checkov results
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const checkovOutput = fs.readFileSync('reports/checkov-results.sarif', 'utf8');
+            const checkovResults = JSON.parse(checkovOutput);
+            
+            let comment = '## 🔍 Checkov Security Scan Results\n\n';
+            
+            if (checkovResults.runs && checkovResults.runs.length > 0) {
+              const run = checkovResults.runs[0];
+              const results = run.results || [];
+              
+              if (results.length === 0) {
+                comment += '✅ **No security issues found!** All infrastructure checks passed.\n\n';
+              } else {
+                comment += `⚠️ **Found ${results.length} security issue(s)**\n\n`;
+                comment += '| Rule ID | Severity | Description | File |\n';
+                comment += '|---------|----------|-------------|------|\n';
+                
+                results.forEach(result => {
+                  const ruleId = result.ruleId || 'Unknown';
+                  const severity = result.level || 'Medium';
+                  const message = result.message?.text || 'No description';
+                  const file = result.locations?.[0]?.physicalLocation?.artifactLocation?.uri || 'Unknown';
+                  
+                  comment += `| ${ruleId} | ${severity} | ${message} | ${file} |\n`;
+                });
+              }
+            } else {
+              comment += 'ℹ️ No scan results available.\n';
+            }
+            
+            comment += '\n---\n';
+            comment += '💡 **Tip**: Fix high and critical severity issues first. ';
+            comment += 'Medium and low severity issues should be reviewed and fixed when possible.';
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+      - name: Upload Checkov results as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkov-results
+          path: reports/checkov-results.sarif
+          retention-days: 30
+
+  checkov-summary:
+    name: Checkov Summary
+    runs-on: ubuntu-latest
+    needs: checkov-scan
+    if: always()
+    
+    steps:
+      - name: Generate Checkov Summary
+        uses: actions/github-script@v7
+        with:
+          script: |
+            console.log('Checkov security scan completed');
+            console.log('Results have been uploaded to GitHub Security tab');
+            console.log('Review the Security tab for detailed findings and remediation guidance');

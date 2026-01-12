@@ -1,0 +1,466 @@
+# Jira Integration Workflow
+# Provides bidirectional synchronization between GitHub and Jira
+#
+# Features:
+# - Automatic issue transitions based on PR lifecycle
+# - Commit linking to Jira issues
+# - PR/branch validation for Jira issue keys
+# - Release notes generation from Jira
+#
+# Required Secrets:
+# - JIRA_BASE_URL: Your Jira instance URL (e.g., https://company.atlassian.net)
+# - JIRA_USER_EMAIL: Email associated with Jira API token
+# - JIRA_API_TOKEN: Jira API token for authentication
+# - JIRA_PROJECT_KEY: Default Jira project key
+
+name: Jira Integration
+
+on:
+  pull_request:
+    types: [opened, synchronize, closed, reopened, ready_for_review]
+  push:
+    branches:
+      - main
+      - master
+      - develop
+      - 'release/**'
+  issues:
+    types: [opened, closed, labeled]
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        type: choice
+        options:
+          - validate-jira-key
+          - sync-status
+          - generate-release-notes
+      issue_key:
+        description: 'Jira issue key (for validate action)'
+        required: false
+
+env:
+  JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+  JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+  JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+  JIRA_PROJECT_KEY: ${{ secrets.JIRA_PROJECT_KEY }}
+
+jobs:
+  # Extract Jira issue key from branch name, PR title, or commit message
+  extract-jira-key:
+    runs-on: ubuntu-latest
+    outputs:
+      issue_key: ${{ steps.extract.outputs.issue_key }}
+      has_key: ${{ steps.extract.outputs.has_key }}
+    steps:
+      - name: Extract Jira Issue Key
+        id: extract
+        run: |
+          # Collect all potential sources for Jira key
+          BRANCH_NAME="${{ github.head_ref || github.ref_name }}"
+          PR_TITLE="${{ github.event.pull_request.title || '' }}"
+          COMMIT_MSG="${{ github.event.head_commit.message || '' }}"
+          MANUAL_KEY="${{ github.event.inputs.issue_key || '' }}"
+
+          # Combine sources
+          SEARCH_TEXT="$BRANCH_NAME $PR_TITLE $COMMIT_MSG $MANUAL_KEY"
+
+          # Extract issue key (pattern: PROJECT-123)
+          ISSUE_KEY=$(echo "$SEARCH_TEXT" | grep -oE '[A-Z][A-Z0-9]+-[0-9]+' | head -1)
+
+          if [ -n "$ISSUE_KEY" ]; then
+            echo "Found Jira issue key: $ISSUE_KEY"
+            echo "issue_key=$ISSUE_KEY" >> $GITHUB_OUTPUT
+            echo "has_key=true" >> $GITHUB_OUTPUT
+          else
+            echo "No Jira issue key found in: $SEARCH_TEXT"
+            echo "issue_key=" >> $GITHUB_OUTPUT
+            echo "has_key=false" >> $GITHUB_OUTPUT
+          fi
+
+  # Validate PR has a Jira issue key
+  validate-jira-key:
+    needs: extract-jira-key
+    if: github.event_name == 'pull_request' && github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for Jira Issue Key
+        run: |
+          if [ "${{ needs.extract-jira-key.outputs.has_key }}" != "true" ]; then
+            echo "::warning::No Jira issue key found in PR title or branch name"
+            echo "Please include a Jira issue key (e.g., PROJ-123) in your:"
+            echo "  - Branch name: feature/PROJ-123-description"
+            echo "  - PR title: PROJ-123: Description of changes"
+            # Uncomment the next line to make this a blocking check
+            # exit 1
+          else
+            echo "Jira issue key found: ${{ needs.extract-jira-key.outputs.issue_key }}"
+          fi
+
+      - name: Validate Issue Exists in Jira
+        if: needs.extract-jira-key.outputs.has_key == 'true'
+        run: |
+          ISSUE_KEY="${{ needs.extract-jira-key.outputs.issue_key }}"
+
+          RESPONSE=$(curl -s -w "\n%{http_code}" -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
+            "$JIRA_BASE_URL/rest/api/3/issue/$ISSUE_KEY?fields=key,summary,status")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | head -n -1)
+
+          if [ "$HTTP_CODE" == "200" ]; then
+            SUMMARY=$(echo "$BODY" | jq -r '.fields.summary')
+            STATUS=$(echo "$BODY" | jq -r '.fields.status.name')
+            echo "Issue found: $ISSUE_KEY"
+            echo "  Summary: $SUMMARY"
+            echo "  Status: $STATUS"
+          elif [ "$HTTP_CODE" == "404" ]; then
+            echo "::error::Jira issue $ISSUE_KEY not found"
+            exit 1
+          else
+            echo "::warning::Could not validate Jira issue (HTTP $HTTP_CODE)"
+          fi
+
+  # Transition issue when PR is opened
+  transition-on-pr-open:
+    needs: extract-jira-key
+    if: |
+      github.event_name == 'pull_request' &&
+      github.event.action == 'opened' &&
+      needs.extract-jira-key.outputs.has_key == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Transition to In Progress/In Review
+        run: |
+          ISSUE_KEY="${{ needs.extract-jira-key.outputs.issue_key }}"
+
+          # Get available transitions
+          TRANSITIONS=$(curl -s -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
+            "$JIRA_BASE_URL/rest/api/3/issue/$ISSUE_KEY/transitions")
+
+          # Find appropriate transition (In Progress, In Review, Code Review)
+          TRANSITION_ID=$(echo "$TRANSITIONS" | jq -r '
+            .transitions[] |
+            select(.name | test("progress|review|code review"; "i")) |
+            .id' | head -1)
+
+          if [ -n "$TRANSITION_ID" ] && [ "$TRANSITION_ID" != "null" ]; then
+            curl -s -X POST -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
+              -H "Content-Type: application/json" \
+              "$JIRA_BASE_URL/rest/api/3/issue/$ISSUE_KEY/transitions" \
+              -d "{\"transition\": {\"id\": \"$TRANSITION_ID\"}}"
+            echo "Transitioned $ISSUE_KEY (transition ID: $TRANSITION_ID)"
+          else
+            echo "No suitable transition found for $ISSUE_KEY"
+          fi
+
+      - name: Add PR Comment to Jira
+        run: |
+          ISSUE_KEY="${{ needs.extract-jira-key.outputs.issue_key }}"
+          PR_URL="${{ github.event.pull_request.html_url }}"
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          PR_AUTHOR="${{ github.event.pull_request.user.login }}"
+
+          curl -s -X POST -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            "$JIRA_BASE_URL/rest/api/3/issue/$ISSUE_KEY/comment" \
+            -d "{
+              \"body\": {
+                \"type\": \"doc\",
+                \"version\": 1,
+                \"content\": [
+                  {
+                    \"type\": \"paragraph\",
+                    \"content\": [
+                      {\"type\": \"text\", \"text\": \"Pull Request opened by \"},
+                      {\"type\": \"text\", \"text\": \"$PR_AUTHOR\", \"marks\": [{\"type\": \"strong\"}]},
+                      {\"type\": \"text\", \"text\": \": \"},
+                      {\"type\": \"text\", \"text\": \"$PR_TITLE\", \"marks\": [{\"type\": \"link\", \"attrs\": {\"href\": \"$PR_URL\"}}]}
+                    ]
+                  }
+                ]
+              }
+            }"
+          echo "Added PR comment to $ISSUE_KEY"
+
+  # Transition issue when PR is merged
+  transition-on-pr-merge:
+    needs: extract-jira-key
+    if: |
+      github.event_name == 'pull_request' &&
+      github.event.action == 'closed' &&
+      github.event.pull_request.merged == true &&
+      needs.extract-jira-key.outputs.has_key == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Transition to Done
+        run: |
+          ISSUE_KEY="${{ needs.extract-jira-key.outputs.issue_key }}"
+
+          # Get available transitions
+          TRANSITIONS=$(curl -s -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
+            "$JIRA_BASE_URL/rest/api/3/issue/$ISSUE_KEY/transitions")
+
+          # Find Done/Complete/Resolved transition
+          TRANSITION_ID=$(echo "$TRANSITIONS" | jq -r '
+            .transitions[] |
+            select(.name | test("done|complete|resolved|closed"; "i")) |
+            .id' | head -1)
+
+          if [ -n "$TRANSITION_ID" ] && [ "$TRANSITION_ID" != "null" ]; then
+            curl -s -X POST -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
+              -H "Content-Type: application/json" \
+              "$JIRA_BASE_URL/rest/api/3/issue/$ISSUE_KEY/transitions" \
+              -d "{\"transition\": {\"id\": \"$TRANSITION_ID\"}}"
+            echo "Transitioned $ISSUE_KEY to Done (transition ID: $TRANSITION_ID)"
+          else
+            echo "No suitable transition found for $ISSUE_KEY"
+          fi
+
+      - name: Add Merge Comment to Jira
+        run: |
+          ISSUE_KEY="${{ needs.extract-jira-key.outputs.issue_key }}"
+          PR_URL="${{ github.event.pull_request.html_url }}"
+          MERGE_SHA="${{ github.event.pull_request.merge_commit_sha }}"
+          BASE_BRANCH="${{ github.event.pull_request.base.ref }}"
+
+          curl -s -X POST -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            "$JIRA_BASE_URL/rest/api/3/issue/$ISSUE_KEY/comment" \
+            -d "{
+              \"body\": {
+                \"type\": \"doc\",
+                \"version\": 1,
+                \"content\": [
+                  {
+                    \"type\": \"paragraph\",
+                    \"content\": [
+                      {\"type\": \"text\", \"text\": \"Pull Request merged to \"},
+                      {\"type\": \"text\", \"text\": \"$BASE_BRANCH\", \"marks\": [{\"type\": \"strong\"}]},
+                      {\"type\": \"text\", \"text\": \" (commit: ${MERGE_SHA:0:7})\"}
+                    ]
+                  },
+                  {
+                    \"type\": \"paragraph\",
+                    \"content\": [
+                      {\"type\": \"text\", \"text\": \"View PR: \"},
+                      {\"type\": \"text\", \"text\": \"$PR_URL\", \"marks\": [{\"type\": \"link\", \"attrs\": {\"href\": \"$PR_URL\"}}]}
+                    ]
+                  }
+                ]
+              }
+            }"
+          echo "Added merge comment to $ISSUE_KEY"
+
+  # Add commit comments to Jira
+  add-commit-comment:
+    needs: extract-jira-key
+    if: |
+      github.event_name == 'push' &&
+      needs.extract-jira-key.outputs.has_key == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add Commit Comment to Jira
+        run: |
+          ISSUE_KEY="${{ needs.extract-jira-key.outputs.issue_key }}"
+          COMMIT_SHA="${{ github.sha }}"
+          COMMIT_URL="${{ github.event.head_commit.url }}"
+          COMMIT_MSG="${{ github.event.head_commit.message }}"
+          AUTHOR="${{ github.event.head_commit.author.name }}"
+          BRANCH="${{ github.ref_name }}"
+
+          # Escape commit message for JSON
+          COMMIT_MSG_ESCAPED=$(echo "$COMMIT_MSG" | head -1 | sed 's/"/\\"/g')
+
+          curl -s -X POST -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            "$JIRA_BASE_URL/rest/api/3/issue/$ISSUE_KEY/comment" \
+            -d "{
+              \"body\": {
+                \"type\": \"doc\",
+                \"version\": 1,
+                \"content\": [
+                  {
+                    \"type\": \"paragraph\",
+                    \"content\": [
+                      {\"type\": \"text\", \"text\": \"Commit by \"},
+                      {\"type\": \"text\", \"text\": \"$AUTHOR\", \"marks\": [{\"type\": \"strong\"}]},
+                      {\"type\": \"text\", \"text\": \" on \"},
+                      {\"type\": \"text\", \"text\": \"$BRANCH\", \"marks\": [{\"type\": \"code\"}]},
+                      {\"type\": \"text\", \"text\": \":\"}
+                    ]
+                  },
+                  {
+                    \"type\": \"paragraph\",
+                    \"content\": [
+                      {\"type\": \"text\", \"text\": \"${COMMIT_SHA:0:7}\", \"marks\": [{\"type\": \"link\", \"attrs\": {\"href\": \"$COMMIT_URL\"}}]},
+                      {\"type\": \"text\", \"text\": \" - $COMMIT_MSG_ESCAPED\"}
+                    ]
+                  }
+                ]
+              }
+            }"
+          echo "Added commit comment to $ISSUE_KEY"
+
+  # Create Jira issue from GitHub issue
+  create-jira-from-github:
+    if: |
+      github.event_name == 'issues' &&
+      github.event.action == 'labeled' &&
+      contains(github.event.issue.labels.*.name, 'sync-to-jira')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create Jira Issue
+        id: create
+        run: |
+          TITLE="${{ github.event.issue.title }}"
+          BODY="${{ github.event.issue.body }}"
+          GITHUB_URL="${{ github.event.issue.html_url }}"
+          LABELS='${{ toJson(github.event.issue.labels.*.name) }}'
+
+          # Determine issue type from labels
+          ISSUE_TYPE="Task"
+          if echo "$LABELS" | grep -qi "bug"; then
+            ISSUE_TYPE="Bug"
+          elif echo "$LABELS" | grep -qi "feature"; then
+            ISSUE_TYPE="Story"
+          elif echo "$LABELS" | grep -qi "enhancement"; then
+            ISSUE_TYPE="Story"
+          fi
+
+          # Escape for JSON
+          TITLE_ESCAPED=$(echo "$TITLE" | sed 's/"/\\"/g')
+          BODY_ESCAPED=$(echo "$BODY" | sed 's/"/\\"/g' | head -c 1000)
+
+          RESPONSE=$(curl -s -X POST -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            "$JIRA_BASE_URL/rest/api/3/issue" \
+            -d "{
+              \"fields\": {
+                \"project\": {\"key\": \"$JIRA_PROJECT_KEY\"},
+                \"summary\": \"$TITLE_ESCAPED\",
+                \"description\": {
+                  \"type\": \"doc\",
+                  \"version\": 1,
+                  \"content\": [
+                    {
+                      \"type\": \"paragraph\",
+                      \"content\": [
+                        {\"type\": \"text\", \"text\": \"GitHub Issue: \"},
+                        {\"type\": \"text\", \"text\": \"$GITHUB_URL\", \"marks\": [{\"type\": \"link\", \"attrs\": {\"href\": \"$GITHUB_URL\"}}]}
+                      ]
+                    },
+                    {
+                      \"type\": \"paragraph\",
+                      \"content\": [
+                        {\"type\": \"text\", \"text\": \"$BODY_ESCAPED\"}
+                      ]
+                    }
+                  ]
+                },
+                \"issuetype\": {\"name\": \"$ISSUE_TYPE\"}
+              }
+            }")
+
+          ISSUE_KEY=$(echo "$RESPONSE" | jq -r '.key')
+          echo "issue_key=$ISSUE_KEY" >> $GITHUB_OUTPUT
+          echo "Created Jira issue: $ISSUE_KEY"
+
+      - name: Add Comment to GitHub Issue
+        if: steps.create.outputs.issue_key != '' && steps.create.outputs.issue_key != 'null'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issueKey = '${{ steps.create.outputs.issue_key }}';
+            const jiraUrl = process.env.JIRA_BASE_URL;
+
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `Jira issue created: [${issueKey}](${jiraUrl}/browse/${issueKey})`
+            });
+
+  # Generate release notes from Jira
+  generate-release-notes:
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'generate-release-notes')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate Release Notes from Jira
+        id: notes
+        run: |
+          VERSION="${{ github.event.release.tag_name || github.ref_name }}"
+
+          # JQL to find issues for this version
+          JQL="project = $JIRA_PROJECT_KEY AND fixVersion = \"$VERSION\" ORDER BY issuetype ASC, priority DESC"
+
+          RESPONSE=$(curl -s -G -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
+            --data-urlencode "jql=$JQL" \
+            --data-urlencode "maxResults=100" \
+            --data-urlencode "fields=key,summary,issuetype,priority" \
+            "$JIRA_BASE_URL/rest/api/3/search")
+
+          TOTAL=$(echo "$RESPONSE" | jq -r '.total')
+          echo "Found $TOTAL issues for version $VERSION"
+
+          # Generate markdown
+          cat > release-notes.md << 'HEADER'
+          # Release Notes - VERSION_PLACEHOLDER
+
+          Generated on DATE_PLACEHOLDER
+
+          HEADER
+
+          sed -i "s/VERSION_PLACEHOLDER/$VERSION/g" release-notes.md
+          sed -i "s/DATE_PLACEHOLDER/$(date -u +"%Y-%m-%d %H:%M UTC")/g" release-notes.md
+
+          # Group by issue type
+          for TYPE in "Bug" "Story" "Task" "Epic"; do
+            ISSUES=$(echo "$RESPONSE" | jq -r ".issues[] | select(.fields.issuetype.name == \"$TYPE\") | \"- [\(.key)]($JIRA_BASE_URL/browse/\(.key)) - \(.fields.summary)\"")
+            if [ -n "$ISSUES" ]; then
+              case $TYPE in
+                "Bug") echo -e "\n## Bug Fixes\n" >> release-notes.md ;;
+                "Story") echo -e "\n## New Features\n" >> release-notes.md ;;
+                "Task") echo -e "\n## Tasks\n" >> release-notes.md ;;
+                "Epic") echo -e "\n## Epics\n" >> release-notes.md ;;
+              esac
+              echo "$ISSUES" >> release-notes.md
+            fi
+          done
+
+          cat release-notes.md
+
+          # Set output
+          NOTES=$(cat release-notes.md)
+          echo "notes<<EOF" >> $GITHUB_OUTPUT
+          echo "$NOTES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Update Release Notes
+        if: github.event_name == 'release' && steps.notes.outputs.notes != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const notes = `${{ steps.notes.outputs.notes }}`;
+
+            await github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: context.payload.release.id,
+              body: notes
+            });
+
+            console.log('Release notes updated successfully');
+
+      - name: Upload Release Notes
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: release-notes.md
+          retention-days: 30
