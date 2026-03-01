@@ -187,11 +187,24 @@ function Get-CommitActivity {
 
     Write-Log "Analyzing commits for: $ProjectName/$RepoName" "INFO"
 
-    # Get commits since cutoff date
-    $url = "$adoBaseUrl/$ProjectName/_apis/git/repositories/$RepoId/commits?searchCriteria.fromDate=$cutoffDateString&api-version=$apiVersion"
-    $commits = Invoke-AdoApi -Url $url
+    # Get commits since cutoff date with pagination
+    $allCommits = @()
+    $pageSize = 100
+    $skip = 0
 
-    if ($null -eq $commits) {
+    do {
+        $url = "$adoBaseUrl/$ProjectName/_apis/git/repositories/$RepoId/commits?searchCriteria.fromDate=$cutoffDateString&`$top=$pageSize&`$skip=$skip&api-version=$apiVersion"
+        $commits = Invoke-AdoApi -Url $url
+
+        if ($null -eq $commits -or $null -eq $commits.value) {
+            break
+        }
+
+        $allCommits += $commits.value
+        $skip += $pageSize
+    } while ($commits.value.Count -eq $pageSize)
+
+    if ($allCommits.Count -eq 0 -and $null -eq $commits) {
         return @{
             CommitCount = 0
             LastCommitDate = $null
@@ -200,7 +213,7 @@ function Get-CommitActivity {
         }
     }
 
-    $commitList = $commits.value
+    $commitList = $allCommits
     $commitCount = $commitList.Count
 
     # Get unique authors
@@ -243,7 +256,7 @@ function Get-PipelineActivity {
     $lastRunDate = $null
     $pipelineNames = @()
 
-    if ($null -ne $definitions -and $definitions.value.Count -gt 0) {
+    if ($null -ne $definitions -and $null -ne $definitions.value -and $definitions.value.Count -gt 0) {
         foreach ($definition in $definitions.value) {
             $pipelineNames += $definition.name
 
@@ -269,7 +282,7 @@ function Get-PipelineActivity {
     }
 
     return @{
-        PipelineCount = $definitions.value.Count
+        PipelineCount = if ($null -ne $definitions -and $null -ne $definitions.value) { $definitions.value.Count } else { 0 }
         PipelineNames = $pipelineNames
         TotalRuns = $totalRuns
         SuccessfulRuns = $successfulRuns

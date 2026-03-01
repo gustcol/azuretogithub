@@ -241,7 +241,7 @@ If services are disrupted:
 ## Contact Information
 
 ### Internal Contacts
-- **Migration Lead**: [Contact Info]
+- **Migration Lead**: Your designated migration team lead or infrastructure team
 - **IT Director**: [Contact Info]
 - **Security Team**: [Contact Info]
 - **Business Stakeholders**: [Contact Info]
@@ -268,6 +268,6 @@ This rollback plan must be approved by:
 - [ ] Business Stakeholder Representative
 - [ ] Migration Project Manager
 
-Date of Last Review: [Date]
-Next Review Date: [Date]
+Date of Last Review: To be determined based on migration schedule
+Next Review Date: To be determined based on migration schedule
 Version: 1.0

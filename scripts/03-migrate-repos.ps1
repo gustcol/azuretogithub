@@ -188,7 +188,7 @@ function Test-GitHubRepoExists {
         $repoUrl = "https://api.github.com/repos/$GhOrg/$RepoName"
         $headers = @{
             "Authorization" = "token $GhToken"
-            "Accept" = "application/vnd.github.v3+json"
+            "Accept" = "application/vnd.github+json"
         }
         
         $response = Invoke-RestMethod -Uri $repoUrl -Method GET -Headers $headers
@@ -235,13 +235,11 @@ function Invoke-RepositoryMigration {
         
         # Add optional flags
         if ($IncludeWiki) {
-            $migrationArgs += "--ado-pat"
-            $migrationArgs += $AdoPat
+            $migrationArgs += "--include-wiki"
         }
-        
+
         if ($IncludeAttachments) {
-            $migrationArgs += "--ado-pat"
-            $migrationArgs += $AdoPat
+            $migrationArgs += "--include-attachments"
         }
         
         # Set environment variables for authentication

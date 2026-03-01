@@ -221,7 +221,7 @@ function Test-Connectivity {
         try {
             $headers = @{
                 "Authorization" = "token $GhToken"
-                "Accept" = "application/vnd.github.v3+json"
+                "Accept" = "application/vnd.github+json"
             }
             
             $response = Invoke-RestMethod -Uri "https://api.github.com/user" -Method GET -Headers $headers -TimeoutSec 30
@@ -293,7 +293,7 @@ function Test-TokenPermissions {
         try {
             $headers = @{
                 "Authorization" = "token $GhToken"
-                "Accept" = "application/vnd.github.v3+json"
+                "Accept" = "application/vnd.github+json"
             }
             
             # Test various API endpoints to check permissions

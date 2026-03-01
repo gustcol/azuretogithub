@@ -42,7 +42,10 @@ param(
     [bool]$IncludeYaml = $true,
     
     [Parameter(Mandatory=$false)]
-    [string]$PipelineFilter = ""
+    [string]$PipelineFilter = "",
+
+    [Parameter(Mandatory=$false)]
+    [string]$GhToken = $env:GH_TOKEN
 )
 
 # Set error handling

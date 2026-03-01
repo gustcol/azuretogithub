@@ -25,6 +25,8 @@
     ./05-convert-pipelines.ps1 -AdoOrg "myorg" -AdoPat "ado-pat" -GhOrg "myghorg" -GhToken "gh-pat" -PipelineFile "./reports/pipeline-analysis-*.csv"
 #>
 
+#Requires -Module powershell-yaml
+
 [CmdletBinding(SupportsShouldProcess=$true)]
 param(
     [Parameter(Mandatory=$true)]
@@ -47,9 +49,6 @@ param(
     
     [Parameter(Mandatory=$false)]
     [string]$TargetDir = "workflows",
-    
-    [Parameter(Mandatory=$false)]
-    [switch]$WhatIf,
     
     [Parameter(Mandatory=$false)]
     [switch]$ValidateOnly,

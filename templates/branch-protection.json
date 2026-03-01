@@ -8,7 +8,7 @@
       "security-scan"
     ]
   },
-  "enforce_admins": false,
+  "enforce_admins": true,
   "required_pull_request_reviews": {
     "required_approving_review_count": 2,
     "dismiss_stale_reviews": true,

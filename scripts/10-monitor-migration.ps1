@@ -176,8 +176,20 @@ function Write-MetricLog {
 
     $script:MonitoringState.Metrics += $metric
 
-    # Append to metrics file
-    $metric | ConvertTo-Json -Compress | Add-Content -Path $script:MetricsFile
+    # Write metrics as JSON array to file
+    $existingMetrics = @()
+    if (Test-Path $script:MetricsFile) {
+        try {
+            $existingContent = Get-Content $script:MetricsFile -Raw -ErrorAction SilentlyContinue
+            if ($existingContent) {
+                $existingMetrics = $existingContent | ConvertFrom-Json
+                if ($existingMetrics -isnot [array]) { $existingMetrics = @($existingMetrics) }
+            }
+        }
+        catch { $existingMetrics = @() }
+    }
+    $existingMetrics += $metric
+    $existingMetrics | ConvertTo-Json -Depth 5 | Set-Content -Path $script:MetricsFile
 }
 
 #endregion
@@ -194,7 +206,7 @@ function Get-AdoAuthHeader {
 function Get-GhAuthHeader {
     return @{
         "Authorization" = "token $GhToken"
-        "Accept" = "application/vnd.github.v3+json"
+        "Accept" = "application/vnd.github+json"
         "Content-Type" = "application/json"
     }
 }
@@ -702,6 +714,8 @@ Azure DevOps to GitHub Migration Monitor
             UseSsl = $emailConfig.useSsl
         }
 
+        # Note: Send-MailMessage is deprecated in PowerShell 6+. Consider using Send-MgMail (Microsoft.Graph) or
+        # a third-party SMTP library such as MailKit for production environments.
         Send-MailMessage @mailParams
         Write-StructuredLog "Email alert sent successfully" "DEBUG" "Alerts"
     }
@@ -726,7 +740,7 @@ function Show-MonitoringDashboard {
     Write-Host "╠══════════════════════════════════════════════════════════════════════════════╣" -ForegroundColor Cyan
     Write-Host "║  Organization: $($AdoOrg.PadRight(62))║" -ForegroundColor Cyan
     Write-Host "║  Monitoring Since: $($script:MonitoringState.StartTime.ToString('yyyy-MM-dd HH:mm:ss').PadRight(58))║" -ForegroundColor Cyan
-    Write-Host "║  Last Check: $($script:MonitoringState.LastCheck.ToString('yyyy-MM-dd HH:mm:ss').PadRight(64))║" -ForegroundColor Cyan
+    Write-Host "║  Last Check: $((if ($script:MonitoringState.LastCheck) { $script:MonitoringState.LastCheck.ToString('yyyy-MM-dd HH:mm:ss') } else { 'Not yet checked' }).PadRight(64))║" -ForegroundColor Cyan
     Write-Host "╚══════════════════════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
 
     # Health Status

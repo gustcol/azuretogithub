@@ -165,9 +165,9 @@
 **Symptoms**: Scripts can't find required environment variables.
 
 **Solutions**:
-1. **Verify .env file**: Ensure `.env` file exists and is properly formatted
-2. **Check variable names**: Ensure no typos in variable names
-3. **Load environment variables**: Scripts should load .env file automatically
+1. **Check parameter values**: Scripts receive credentials via command-line parameters (e.g., `-AdoPat`, `-GhToken`). The `.env.example` file is for reference/documentation only and is not loaded automatically.
+2. **Check variable names**: Ensure no typos in variable names or parameter names
+3. **Use environment variables directly**: Set variables in your shell session (e.g., `$env:ADO_PAT = "your-token"`) and reference them when calling scripts
 4. **Use absolute paths**: Try using absolute paths for file references
 
 ## Diagnostic Commands

@@ -87,7 +87,8 @@
       "customfield_storypoints": {
         "name": "Story Points",
         "type": "number",
-        "jiraFieldId": ""
+        "jiraFieldId": "",
+        "_note": "Instance-specific field. The actual custom field ID (e.g., customfield_10016) varies per Jira installation. Check Admin > Issues > Custom Fields to find your instance's story points field ID."
       },
       "customfield_severity": {
         "name": "Severity",

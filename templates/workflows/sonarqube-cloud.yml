@@ -42,7 +42,7 @@ jobs:
           elif [ -f "requirements.txt" ] || [ -f "setup.py" ] || [ -f "pyproject.toml" ]; then
             echo "type=python" >> $GITHUB_OUTPUT
             echo "language=python" >> $GITHUB_OUTPUT
-          elif [ -f "*.csproj" ] || [ -f "*.sln" ]; then
+          elif ls *.csproj 1>/dev/null 2>&1 || [ -f "*.sln" ]; then
             echo "type=dotnet" >> $GITHUB_OUTPUT
             echo "language=csharp" >> $GITHUB_OUTPUT
           else
@@ -119,7 +119,7 @@ jobs:
           dotnet test --no-build --verbosity normal --collect:"XPlat Code Coverage"
       
       - name: SonarQube Cloud Scan
-        uses: SonarSource/sonarcloud-github-action@master
+        uses: SonarSource/sonarcloud-github-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

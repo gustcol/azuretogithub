@@ -484,10 +484,16 @@ function Send-EmailAlert {
             $mailParams.UseSsl = $true
         }
 
-        if ($config.username -and $config.password) {
-            $securePassword = ConvertTo-SecureString $config.password -AsPlainText -Force
-            $credential = New-Object System.Management.Automation.PSCredential($config.username, $securePassword)
-            $mailParams.Credential = $credential
+        if ($config.username) {
+            $smtpPassword = $env:SMTP_PASSWORD
+            if (-not $smtpPassword -and $config.password) {
+                $smtpPassword = $config.password
+            }
+            if ($smtpPassword) {
+                $securePassword = ConvertTo-SecureString $smtpPassword -AsPlainText -Force
+                $credential = New-Object System.Management.Automation.PSCredential($config.username, $securePassword)
+                $mailParams.Credential = $credential
+            }
         }
 
         Send-MailMessage @mailParams
@@ -550,7 +556,7 @@ function Send-Alert {
     }
 
     # Log alert
-    Write-AlertLog "Alert sent - Type: $($Alert.type), Severity: $($Alert.severity), Channels: $($results.GetEnumerator() | Where-Object { $_.Value } | ForEach-Object { $_.Key } | Join-String -Separator ', ')"
+    Write-AlertLog "Alert sent - Type: $($Alert.type), Severity: $($Alert.severity), Channels: $(($results.GetEnumerator() | Where-Object { $_.Value } | ForEach-Object { $_.Key }) -join ', ')"
 
     return $results
 }

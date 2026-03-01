@@ -103,7 +103,7 @@ $ghAuthHeader = @{}
 if ($GhToken) {
     $ghAuthHeader = @{
         "Authorization" = "token $GhToken"
-        "Accept" = "application/vnd.github.v3+json"
+        "Accept" = "application/vnd.github+json"
         "Content-Type" = "application/json"
     }
 }
@@ -393,8 +393,8 @@ function Show-Dashboard {
     Write-Host "├─────────────────────────────────────────────────────────────────────────────┤" -ForegroundColor White
     Write-Host "│                                                                              │" -ForegroundColor White
     Write-Host "│   Total Repositories:     $($total.ToString().PadLeft(6))                                            │" -ForegroundColor White
-    Write-Host "│   Active (last 12 mo):    $($active.ToString().PadLeft(6))    $(('(' + [Math]::Round(($active/$total)*100,1) + '%)').PadRight(10))                        │" -ForegroundColor Green
-    Write-Host "│   Inactive:               $($inactive.ToString().PadLeft(6))    $(('(' + [Math]::Round(($inactive/$total)*100,1) + '%)').PadRight(10))                        │" -ForegroundColor Yellow
+    Write-Host "│   Active (last 12 mo):    $($active.ToString().PadLeft(6))    $(('(' + (if ($total -gt 0) { [Math]::Round(($active/$total)*100,1) } else { 0 }) + '%)').PadRight(10))                        │" -ForegroundColor Green
+    Write-Host "│   Inactive:               $($inactive.ToString().PadLeft(6))    $(('(' + (if ($total -gt 0) { [Math]::Round(($inactive/$total)*100,1) } else { 0 }) + '%)').PadRight(10))                        │" -ForegroundColor Yellow
     Write-Host "│                                                                              │" -ForegroundColor White
     Write-Host "└─────────────────────────────────────────────────────────────────────────────┘" -ForegroundColor White
     Write-Host ""
