@@ -81,7 +81,7 @@ function Write-Log {
 $ghApiBase = "https://api.github.com"
 $ghAuthHeader = @{
     "Authorization" = "token $GhToken"
-    "Accept" = "application/vnd.github.v3+json"
+    "Accept" = "application/vnd.github+json"
     "Content-Type" = "application/json"
 }
 
@@ -247,51 +247,34 @@ function Enable-AdvancedSecurity {
         $features = $Config.securityFeatures
         $results = @{}
         
-        # Enable advanced security
-        if ($features.advanced_security) {
-            $url = "$ghApiBase/repos/$GhOrg/$RepoName/advanced-security"
-            $body = @{ "enabled" = $true } | ConvertTo-Json
-            
+        # Enable advanced security, secret scanning, and push protection via a single PATCH
+        if ($features.advanced_security -or $features.secret_scanning -or $features.secret_scanning_push_protection) {
+            $securityAnalysis = @{}
+            if ($features.advanced_security) {
+                $securityAnalysis["advanced_security"] = @{ "status" = "enabled" }
+            }
+            if ($features.secret_scanning) {
+                $securityAnalysis["secret_scanning"] = @{ "status" = "enabled" }
+            }
+            if ($features.secret_scanning_push_protection) {
+                $securityAnalysis["secret_scanning_push_protection"] = @{ "status" = "enabled" }
+            }
+
+            $url = "$ghApiBase/repos/$GhOrg/$RepoName"
+            $body = @{ "security_and_analysis" = $securityAnalysis } | ConvertTo-Json -Depth 5
+
             try {
                 $response = Invoke-RestMethod -Uri $url -Method PATCH -Headers $ghAuthHeader -Body $body
-                $results.AdvancedSecurity = "Enabled"
-                Write-Log "Advanced security enabled for $RepoName"
+                if ($features.advanced_security) { $results.AdvancedSecurity = "Enabled" }
+                if ($features.secret_scanning) { $results.SecretScanning = "Enabled" }
+                if ($features.secret_scanning_push_protection) { $results.PushProtection = "Enabled" }
+                Write-Log "Advanced security features enabled for $RepoName"
             }
             catch {
-                Write-Log "Failed to enable advanced security for $RepoName: $($_.Exception.Message)" "WARNING"
-                $results['AdvancedSecurity'] = "Failed"
-            }
-        }
-        
-        # Enable secret scanning
-        if ($features.secret_scanning) {
-            $url = "$ghApiBase/repos/$GhOrg/$RepoName/secret-scanning"
-            $body = @{ "enabled" = $true } | ConvertTo-Json
-            
-            try {
-                $response = Invoke-RestMethod -Uri $url -Method PATCH -Headers $ghAuthHeader -Body $body
-                $results.SecretScanning = "Enabled"
-                Write-Log "Secret scanning enabled for $RepoName"
-            }
-            catch {
-                Write-Log "Failed to enable secret scanning for $RepoName: $($_.Exception.Message)" "WARNING"
-                $results['SecretScanning'] = "Failed"
-            }
-        }
-        
-        # Enable secret scanning push protection
-        if ($features.secret_scanning_push_protection) {
-            $url = "$ghApiBase/repos/$GhOrg/$RepoName/secret-scanning/push-protection"
-            $body = @{ "enabled" = $true } | ConvertTo-Json
-            
-            try {
-                $response = Invoke-RestMethod -Uri $url -Method PATCH -Headers $ghAuthHeader -Body $body
-                $results.PushProtection = "Enabled"
-                Write-Log "Secret scanning push protection enabled for $RepoName"
-            }
-            catch {
-                Write-Log "Failed to enable push protection for $RepoName: $($_.Exception.Message)" "WARNING"
-                $results['PushProtection'] = "Failed"
+                Write-Log "Failed to enable advanced security features for $RepoName: $($_.Exception.Message)" "WARNING"
+                if ($features.advanced_security) { $results['AdvancedSecurity'] = "Failed" }
+                if ($features.secret_scanning) { $results['SecretScanning'] = "Failed" }
+                if ($features.secret_scanning_push_protection) { $results['PushProtection'] = "Failed" }
             }
         }
         
@@ -401,19 +384,31 @@ updates:
       interval: "weekly"
 "@
 
-        # Create .github directory if it doesn't exist
-        $githubDir = ".github"
-        if (!(Test-Path $githubDir)) {
-            New-Item -ItemType Directory -Path $githubDir -Force | Out-Null
+        # Push dependabot.yml to the repo via GitHub Contents API
+        $filePath = ".github/dependabot.yml"
+        $url = "$ghApiBase/repos/$GhOrg/$RepoName/contents/$filePath"
+
+        # Check if file already exists (to get sha for update)
+        $sha = $null
+        try {
+            $existingFile = Invoke-RestMethod -Uri $url -Method GET -Headers $ghAuthHeader
+            $sha = $existingFile.sha
         }
-        
-        # Write dependabot.yml
-        $configPath = Join-Path $githubDir "dependabot.yml"
-        $dependabotConfig | Out-File $configPath -Encoding UTF8
-        
-        Write-Log "Dependabot configuration created: $configPath"
-        
-        # Commit and push the configuration (this would need to be done via API or CLI)
+        catch { }
+
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($dependabotConfig)
+        $encodedContent = [Convert]::ToBase64String($bytes)
+
+        $body = @{
+            message = "Add Dependabot configuration"
+            content = $encodedContent
+            branch  = "main"
+        }
+        if ($sha) { $body.sha = $sha }
+
+        $response = Invoke-RestMethod -Uri $url -Method PUT -Headers $ghAuthHeader -Body ($body | ConvertTo-Json)
+        Write-Log "Dependabot configuration pushed to $RepoName"
+
         return $true
     }
     catch {
@@ -640,7 +635,7 @@ We release patches for security vulnerabilities. Which versions are eligible rec
 
 ## Reporting a Vulnerability
 
-Please report vulnerabilities to our security team at: security@$GhOrg.com
+Please report vulnerabilities to our security team at: security@example.com (update this address before publishing)
 
 **Please do not report security vulnerabilities through public GitHub issues.**
 

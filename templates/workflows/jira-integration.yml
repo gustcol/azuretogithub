@@ -333,7 +333,7 @@ jobs:
 
           # Escape for JSON
           TITLE_ESCAPED=$(echo "$TITLE" | sed 's/"/\\"/g')
-          BODY_ESCAPED=$(echo "$BODY" | sed 's/"/\\"/g' | head -c 1000)
+          BODY_ESCAPED=$(echo "$BODY" | sed 's/"/\\"/g' | cut -c1-1000)
 
           RESPONSE=$(curl -s -X POST -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
             -H "Content-Type: application/json" \

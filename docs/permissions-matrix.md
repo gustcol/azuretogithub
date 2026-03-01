@@ -127,7 +127,7 @@ This document provides a comprehensive breakdown of the permissions and security
 
 ## Identity Provider Configuration
 
-### Entra ID (Azure AD) Requirements
+### Entra ID Requirements
 
 **For SCIM Provisioning**:
 - **Role**: Global Administrator or User Administrator

@@ -58,7 +58,7 @@ Create a PAT with the following minimum scopes:
   - `admin:public_key` (for deploy keys)
   - `admin:gpg_key` (for commit signing)
 
-#### Entra ID (Azure AD) Permissions
+#### Entra ID Permissions
 - **Global Administrator** or **User Administrator** (for SCIM provisioning)
 - **Application Administrator** (for SSO configuration)
 
@@ -354,6 +354,7 @@ migration-factory/
 ├── reports/                      # Generated assessment reports
 │   └── metrics/                  # Performance metrics
 ├── .env.example                  # Environment variables template
+├── .gitignore                    # Git ignore rules
 └── README.md                     # This file
 ```
 
@@ -708,7 +709,7 @@ See `docs/rollback-plan.md` for detailed procedures.
 ## 🛡️ Security Considerations
 
 ### Data Protection
-- All PAT tokens are stored securely (use Azure Key Vault in production)
+- PAT tokens should be stored securely using environment variables or a secrets manager (e.g., Azure Key Vault). Never commit tokens to source control.
 - Migration logs are sanitized to remove sensitive data
 - Network traffic uses HTTPS/TLS encryption
 

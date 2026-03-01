@@ -29,7 +29,7 @@ param(
 
 # Import required modules
 #Requires -Version 7.0
-#Requires -Module Az.Accounts, Az.DevOps
+#Requires -Module Az.Accounts
 
 # Set error handling
 $ErrorActionPreference = "Stop"
@@ -304,7 +304,7 @@ try {
     Write-Log "Pipelines report saved: inventory-pipelines.csv"
     
     # Users report
-    $allUsers | Select-Object -Unique | Export-Csv -Path (Join-Path $OutputDir "inventory-users.csv") -NoTypeInformation
+    $allUsers | Sort-Object -Property @{Expression={$_.MailAddress}; Ascending=$true} -Unique | Export-Csv -Path (Join-Path $OutputDir "inventory-users.csv") -NoTypeInformation
     Write-Log "Users report saved: inventory-users.csv"
     
     # Generate summary report
@@ -316,7 +316,7 @@ try {
         TotalBuildPipelines = $allBuildPipelines.Count
         TotalReleasePipelines = $allReleasePipelines.Count
         TotalPipelines = $allPipelines.Count
-        TotalUsers = ($allUsers | Select-Object -Unique MailAddress).Count
+        TotalUsers = ($allUsers | Sort-Object -Property @{Expression={$_.MailAddress}; Ascending=$true} -Unique).Count
         DisabledRepositories = ($allRepos | Where-Object { $_.IsDisabled -eq $true }).Count
         ForkRepositories = ($allRepos | Where-Object { $_.IsFork -eq $true }).Count
         DisabledPipelines = ($allPipelines | Where-Object { $_.IsDisabled -eq $true }).Count

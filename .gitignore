@@ -1,0 +1,31 @@
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Local tool config
+.claude/
+
+# Environment and credentials
+.env
+*.env
+
+# Runtime outputs
+logs/
+reports/*
+!reports/metrics/
+reports/metrics/*
+!reports/metrics/.gitkeep
+converted-workflows/
+
+# Migration state files
+jira-migration-state.json
+prereq-validation-*.json
+
+# Security scan outputs
+*.sarif
+trivy-*.json
+bandit-report.json
+
+# Editor config
+.vscode/
+.idea/

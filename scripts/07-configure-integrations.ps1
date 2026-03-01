@@ -70,7 +70,7 @@ function Write-Log {
 # GitHub API headers
 $ghHeaders = @{
     "Authorization" = "token $GhToken"
-    "Accept" = "application/vnd.github.v3+json"
+    "Accept" = "application/vnd.github+json"
     "Content-Type" = "application/json"
 }
 
@@ -288,15 +288,11 @@ function New-OrganizationSecrets {
     
     foreach ($secret in $Secrets.GetEnumerator()) {
         try {
-            $url = "https://api.github.com/orgs/$GhOrg/actions/secrets/$($secret.Key)"
-            $body = @{
-                encrypted_value = $secret.Value
-                visibility = "all"
-            }
-            
             if ($PSCmdlet.ShouldProcess("Organization secret $($secret.Key)", "Create secret")) {
-                $response = Invoke-RestMethod -Uri $url -Method PUT -Headers $ghHeaders -Body ($body | ConvertTo-Json)
-                Write-Log "Created organization secret $($secret.Key)" "SUCCESS"
+                $SecretName = $secret.Key
+                $SecretValue = $secret.Value
+                $SecretValue | gh secret set $SecretName --org $GhOrg
+                Write-Log "Created organization secret $SecretName" "SUCCESS"
             }
             else {
                 Write-Log "Would create organization secret $($secret.Key) (WhatIf mode)" "INFO"
@@ -495,7 +491,7 @@ try {
     
     # Determine which tools to configure
     $toolsToConfigure = if ($Tools -eq "All") {
-        @("Checkov", "SonarQube", "PreCommit")
+        @("Checkov", "SonarQube", "PreCommit", "BlackDuck", "AquaSec")
     } else {
         $Tools -split "," | ForEach-Object { $_.Trim() }
     }

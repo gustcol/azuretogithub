@@ -191,6 +191,12 @@ function Initialize-FieldMapping {
     else {
         Write-Log "Using default field mapping"
     }
+
+    # Use configurable story points field ID if provided in mapping config, otherwise fall back to customfield_10016
+    $storyPointsFieldId = if ($script:FieldMapping.jiraFieldId) { $script:FieldMapping.jiraFieldId } else { "customfield_10016" }
+    if ($script:FieldMapping.fields -and $script:FieldMapping.fields.ContainsKey("Microsoft.VSTS.Scheduling.StoryPoints")) {
+        $script:FieldMapping.fields["Microsoft.VSTS.Scheduling.StoryPoints"] = $storyPointsFieldId
+    }
 }
 
 function Invoke-AdoApi {
@@ -383,6 +389,8 @@ function Convert-AdoToJiraDescription {
         return $null
     }
 
+    Add-Type -AssemblyName System.Web
+
     # Convert HTML to Atlassian Document Format (ADF)
     # Basic conversion - strip HTML tags for simple text
     $text = $HtmlContent -replace '<br\s*/?>', "`n"
@@ -553,29 +561,28 @@ function Add-JiraAttachment {
         $tempFile = Join-Path $env:TEMP $FileName
         Invoke-WebRequest -Uri $AttachmentUrl -Headers $adoAuthHeader -OutFile $tempFile
 
-        # Upload to Jira
-        $boundary = [guid]::NewGuid().ToString()
-        $fileBytes = [System.IO.File]::ReadAllBytes($tempFile)
-        $fileEnc = [System.Text.Encoding]::GetEncoding('ISO-8859-1').GetString($fileBytes)
+        # Upload to Jira using proper multipart form data
+        Add-Type -AssemblyName System.Net.Http
 
-        $bodyLines = @(
-            "--$boundary",
-            "Content-Disposition: form-data; name=`"file`"; filename=`"$FileName`"",
-            "Content-Type: application/octet-stream",
-            "",
-            $fileEnc,
-            "--$boundary--"
-        ) -join "`r`n"
+        $httpClient = [System.Net.Http.HttpClient]::new()
+        $httpClient.DefaultRequestHeaders.Add("Authorization", "Basic $jiraAuthString")
+        $httpClient.DefaultRequestHeaders.Add("X-Atlassian-Token", "no-check")
 
-        $headers = @{
-            "Authorization" = "Basic $jiraAuthString"
-            "X-Atlassian-Token" = "no-check"
-            "Content-Type" = "multipart/form-data; boundary=$boundary"
+        $multipartContent = [System.Net.Http.MultipartFormDataContent]::new()
+        $fileStream = [System.IO.File]::OpenRead($tempFile)
+        $streamContent = [System.Net.Http.StreamContent]::new($fileStream)
+        $multipartContent.Add($streamContent, "file", $FileName)
+
+        $response = $httpClient.PostAsync("$JiraUrl/rest/api/3/issue/$IssueKey/attachments", $multipartContent).GetAwaiter().GetResult()
+
+        $fileStream.Close()
+        $httpClient.Dispose()
+        Remove-Item $tempFile -Force
+
+        if (-not $response.IsSuccessStatusCode) {
+            throw "HTTP $($response.StatusCode): $($response.ReasonPhrase)"
         }
 
-        Invoke-RestMethod -Uri "$JiraUrl/rest/api/3/issue/$IssueKey/attachments" -Method POST -Headers $headers -Body $bodyLines
-
-        Remove-Item $tempFile -Force
         Write-Log "Added attachment to $IssueKey : $FileName"
     }
     catch {

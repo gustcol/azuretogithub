@@ -27,7 +27,7 @@ jobs:
         
       - name: Run Checkov scan
         id: checkov
-        uses: bridgecrewio/checkov-action@master
+        uses: bridgecrewio/checkov-action@v12
         with:
           directory: .
           check: CKV_*  # All Checkov checks
@@ -38,6 +38,7 @@ jobs:
           download_external_modules: true
           soft_fail: false
           compact: true
+          version: ${{ env.CHECKOV_VERSION }}
           
       - name: Upload Checkov results to GitHub Security
         if: always()

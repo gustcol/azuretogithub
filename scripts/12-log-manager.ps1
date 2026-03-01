@@ -439,6 +439,8 @@ function Export-HtmlReport {
         [string]$OutputPath
     )
 
+    Add-Type -AssemblyName System.Web
+
     $html = @"
 <!DOCTYPE html>
 <html>

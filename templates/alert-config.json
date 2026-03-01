@@ -12,7 +12,7 @@
         "devops-team@example.com"
       ],
       "username": "",
-      "password": ""
+      "passwordEnvVar": "SMTP_PASSWORD"
     },
     "slack": {
       "enabled": false,
@@ -23,7 +23,8 @@
     },
     "teams": {
       "enabled": false,
-      "webhookUrl": "https://outlook.office.com/webhook/YOUR/WEBHOOK/URL"
+      "webhookUrl": "https://outlook.office.com/webhook/YOUR/WEBHOOK/URL",
+      "_note": "Legacy Office 365 connector format. Migrate to Power Automate workflows for new deployments."
     },
     "console": {
       "enabled": true

@@ -268,8 +268,8 @@ function Set-OrganizationSecret {
     try {
         $env:GH_TOKEN = $GitHubPat
 
-        # Set the secret using gh CLI
-        $result = $SecretValue | gh secret set $SecretName --org $GitHubOrg --visibility $Visibility 2>&1
+        # Set the secret using gh CLI with --body flag to avoid shell exposure
+        $result = gh secret set $SecretName --org $GitHubOrg --visibility $Visibility --body $SecretValue 2>&1
 
         if ($LASTEXITCODE -eq 0) {
             Write-Log "Successfully set organization secret: $SecretName" -Level SUCCESS
@@ -303,7 +303,7 @@ function Set-RepositorySecret {
     try {
         $env:GH_TOKEN = $GitHubPat
 
-        $result = $SecretValue | gh secret set $SecretName --repo "$GitHubOrg/$Repository" 2>&1
+        $result = gh secret set $SecretName --repo "$GitHubOrg/$Repository" --body $SecretValue 2>&1
 
         if ($LASTEXITCODE -eq 0) {
             Write-Log "Successfully set repository secret: $SecretName for $Repository" -Level SUCCESS
@@ -589,7 +589,7 @@ name: Jira Status Sync
 
 on:
   schedule:
-    - cron: '*/15 * * * *'  # Every 15 minutes
+    - cron: '0 */4 * * *'  # Every 4 hours
   workflow_dispatch:
 
 env:
@@ -835,7 +835,14 @@ function Deploy-WorkflowToRepository {
         }
 
         $bodyJson = $body | ConvertTo-Json -Compress
-        $result = echo $bodyJson | gh api "/repos/$GitHubOrg/$Repository/contents/$workflowPath" --method PUT --input - 2>&1
+        $tempFile = [System.IO.Path]::GetTempFileName()
+        try {
+            $bodyJson | Set-Content -Path $tempFile -Encoding UTF8
+            $result = gh api "/repos/$GitHubOrg/$Repository/contents/$workflowPath" --method PUT --input $tempFile 2>&1
+        }
+        finally {
+            if (Test-Path $tempFile) { Remove-Item $tempFile -Force }
+        }
 
         if ($LASTEXITCODE -eq 0) {
             Write-Log "Successfully deployed workflow '$WorkflowName' to $Repository" -Level SUCCESS

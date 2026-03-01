@@ -70,7 +70,7 @@ $adoAuthHeader = @{
 
 $ghAuthHeader = @{
     "Authorization" = "token $GhToken"
-    "Accept" = "application/vnd.github.v3+json"
+    "Accept" = "application/vnd.github+json"
 }
 
 Write-Log "Starting identity mapping generation for ADO: $AdoOrg -> GitHub: $GhOrg"
@@ -117,17 +117,20 @@ function Get-GitHubMembers {
     
     do {
         try {
-            $response = Invoke-RestMethod -Uri $url -Method GET -Headers $ghAuthHeader
-            
-            foreach ($member in $response) {
+            $response = Invoke-WebRequest -Uri $url -Method GET -Headers $ghAuthHeader
+            $pageMembers = $response.Content | ConvertFrom-Json
+
+            foreach ($member in $pageMembers) {
                 # Get user details
                 $userUrl = "$ghBaseUrl/users/$($member.login)"
                 $userDetails = Invoke-RestMethod -Uri $userUrl -Method GET -Headers $ghAuthHeader
-                
+
+                $memberEmail = if ($userDetails.email) { $userDetails.email.ToLower() } else { $null }
+
                 $members += [PSCustomObject]@{
                     GitHubLogin = $member.login
                     GitHubId = $member.id
-                    Email = $userDetails.email?.ToLower()
+                    Email = $memberEmail
                     Name = $userDetails.name
                     Company = $userDetails.company
                     Location = $userDetails.location
@@ -135,11 +138,12 @@ function Get-GitHubMembers {
                     HtmlUrl = $userDetails.html_url
                 }
             }
-            
-            # Check for pagination
+
+            # Check for pagination via Link header
             $url = $null
-            if ($response.Headers.Link) {
-                $links = $response.Headers.Link -split ','
+            $linkHeader = $response.Headers['Link']
+            if ($linkHeader) {
+                $links = $linkHeader -split ','
                 foreach ($link in $links) {
                     if ($link -match '<([^>]+)>; rel="next"') {
                         $url = $matches[1]
